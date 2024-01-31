@@ -153,9 +153,14 @@
   }
   
   #status {
-      padding: 5px 10px;
-      text-align: center;
-      font-size: 12px;
+    padding: 5px 10px;
+    text-align: center;
+    font-size: 12px;
+  }
+
+  #refersh {
+    float: right;
+    height: 100% !important;
   }
   
   #status.pending::before {
