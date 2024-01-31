@@ -2,7 +2,7 @@
 extern crate rocket;
 
 use rocket::form::Form;
-use rocket::fs::{relative, FileServer};
+use rocket::fs::FileServer;
 use rocket::response::stream::{Event, EventStream};
 use rocket::serde::{Deserialize, Serialize};
 use rocket::tokio::select;
@@ -89,8 +89,8 @@ fn post(form: Form<Message>, queue: &State<Sender<Message>>) {
       }
     }
 
-    if !(homogenus_comp || check_repeats(&message.replace(' ', "")) != message.len()-message.matches(' ').count() || username == "[STATUS]" || username == "[SERVER]") {
-        let _res = queue.send(inner);
+    if !(homogenus_comp || check_repeats(&message.replace(' ', "")) != message.len()-message.matches(' ').count() || username == "[STATUS]" || username == "[SERVER]" || message.starts_with('/')) {
+        let _ = queue.send(inner);
     }
 }
 
@@ -166,5 +166,5 @@ fn rocket() -> _ {
         .manage(channel::<Message>(1024).0)
         .manage(Users {users: RwLock::new(vec![])})
         .mount("/", routes![post, events, add_user, get_users])
-        .mount("/", FileServer::from(relative!("static")))
+        .mount("/", FileServer::from("static"))
 }
