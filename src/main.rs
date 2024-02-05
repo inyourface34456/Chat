@@ -11,9 +11,11 @@ use rocket::tokio::select;
 use rocket::tokio::sync::broadcast::{channel, error::RecvError, Sender};
 use rocket::{Shutdown, State};
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::mem::drop;
 use std::sync::RwLock;
-use std::collections::HashMap;
+
+static NOT_ALLOWED_UNAMES: [&str; 4] = ["[system]", "[debug]", "[status]", "system"];
 
 #[derive(Debug, Clone, FromForm, Serialize, Deserialize, Eq, Hash, PartialEq)]
 #[cfg_attr(test, derive(UriDisplayQuery))]
@@ -38,7 +40,7 @@ struct Rooms {
 }
 
 struct SavedMessages {
-    pub map: RwLock<HashMap<String, Vec<Message>>>
+    pub map: RwLock<HashMap<String, Vec<Message>>>,
 }
 
 #[derive(FromForm)]
@@ -49,7 +51,7 @@ struct UserInput {
 
 #[derive(FromForm)]
 struct RoomName {
-    pub room_name: String
+    pub room_name: String,
 }
 
 fn rw_lock_to_json<T: Serialize>(users: &RwLock<Vec<T>>) -> (Status, (ContentType, String)) {
@@ -118,7 +120,12 @@ async fn events(queue: &State<Sender<Message>>, mut end: Shutdown) -> EventStrea
 
 /// Receive a message from a form submission and broadcast it to any receivers.
 #[post("/message", data = "<form>")]
-fn post(form: Form<Message>, queue: &State<Sender<Message>>, rooms: &State<Rooms>, messages: &State<SavedMessages>) {
+fn post(
+    form: Form<Message>,
+    queue: &State<Sender<Message>>,
+    rooms: &State<Rooms>,
+    messages: &State<SavedMessages>,
+) {
     // A send 'fails' if there are no active subscribers. That's okay.
     let inner = form.into_inner();
     let message = &inner.message;
@@ -153,7 +160,18 @@ fn post(form: Form<Message>, queue: &State<Sender<Message>>, rooms: &State<Rooms
     loop {
         if let Ok(mut hashmap) = messages.try_write() {
             if !hashmap.keys().any(|e| room.contains(e)) {
-                hashmap.insert(room.to_string(), vec![inner.clone()]);
+                hashmap.insert(
+                    room.to_string(),
+                    vec![
+                        Message {
+                            room: room.to_string(),
+                            username: String::from("System"),
+                            message: format!("Welcome to {}", room),
+                            color: String::from("hash"),
+                        },
+                        inner.clone(),
+                    ],
+                );
             } else {
                 hashmap.get_mut(room).unwrap().push(inner.clone());
             }
@@ -163,10 +181,8 @@ fn post(form: Form<Message>, queue: &State<Sender<Message>>, rooms: &State<Rooms
 
     if !(homogenus_comp
         || check_repeats(&message.replace(' ', "")) != message.len() - message.matches(' ').count()
-        || username == "[STATUS]"
-        || username == "[SERVER]"
-        || message.starts_with('/')
-        || username == "System")
+        || NOT_ALLOWED_UNAMES.contains(&username.to_lowercase().as_ref())
+        || message.starts_with('/'))
     {
         let _ = queue.send(inner);
     }
@@ -216,12 +232,15 @@ fn get_rooms(rooms: &State<Rooms>) -> (Status, (ContentType, String)) {
 }
 
 #[post("/messages", data = "<room_name>")]
-fn get_messages(messages: &State<SavedMessages>, room_name: Form<RoomName>) -> (Status, (ContentType, String)) {
+fn get_messages(
+    messages: &State<SavedMessages>,
+    room_name: Form<RoomName>,
+) -> (Status, (ContentType, String)) {
     let inner = room_name.into_inner();
     let room = inner.room_name;
     let map = &messages.map;
     let mut messages = vec![];
-    
+
     loop {
         if let Ok(map) = map.read() {
             if let Some(vec) = map.get(&room) {
@@ -230,7 +249,7 @@ fn get_messages(messages: &State<SavedMessages>, room_name: Form<RoomName>) -> (
                 }
                 break;
             } else {
-                return (Status::NotFound, (ContentType::JSON, String::new()))
+                return (Status::NotFound, (ContentType::JSON, String::new()));
             }
         }
     }
@@ -249,9 +268,11 @@ fn rocket() -> _ {
             users: RwLock::new(vec!["lobby".to_string()]),
         })
         .manage(SavedMessages {
-            map: RwLock::new(HashMap::new())
-        }
+            map: RwLock::new(HashMap::new()),
+        })
+        .mount(
+            "/",
+            routes![post, events, add_user, get_users, get_rooms, get_messages],
         )
-        .mount("/", routes![post, events, add_user, get_users, get_rooms, get_messages])
         .mount("/", FileServer::from("static"))
 }

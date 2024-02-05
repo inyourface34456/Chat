@@ -114,7 +114,7 @@ function addRoom(name, change=true) {
 	// 	}
 	// });
 
-	addMessage(name, "System", `Welcome to ${name}`);
+	// addMessage(name, "System", `Welcome to ${name}`);
 
 	var node = roomTemplate.content.cloneNode(true);
 	var room = node.querySelector(".room");
